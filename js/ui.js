@@ -2,6 +2,13 @@
  * DOM wiring: renders controls/results and re-runs the search whenever the
  * selected base product or target-effect list changes. Depends on data.js
  * (game data) and mixing.js (search engine) being loaded first.
+ *
+ * The search itself runs in a Web Worker (js/worker.js) so deep explorations never
+ * freeze the page; each query gets an id and stale responses are discarded, so rapid
+ * effect-adding just supersedes the in-flight query. A spinner appears only if the
+ * search is still running after 150ms — instant queries never flash it. If the worker
+ * can't start (e.g. the page is opened from file://, where Chrome blocks workers),
+ * queries fall back to running search() synchronously on this thread.
  */
 
 let selectedEffects = [];
@@ -46,6 +53,23 @@ function effPill(name, isTarget, isNew){
   return `<span class="${cls.join(' ')}">${name}</span>`;
 }
 
+let searchWorker = null;
+try{ searchWorker = new Worker('js/worker.js'); }catch(e){ /* file:// etc. — sync fallback */ }
+let queryId = 0, spinnerTimer = null, pendingCtx = null;
+
+if(searchWorker){
+  searchWorker.onmessage = e=>{
+    if(e.data.id !== queryId) return; // superseded by a newer query
+    clearTimeout(spinnerTimer);
+    render(e.data.result, pendingCtx);
+  };
+  searchWorker.onerror = ()=>{ searchWorker = null; run(); }; // worker failed to load — retry synchronously
+}
+
+function showSearching(){
+  outputEl.innerHTML = `<div class="panel" data-label="Result"><div class="searching">Searching mix space…</div></div>`;
+}
+
 function run(){
   const baseName = baseSelect.value;
   const def = STRAIN_DEFAULTS[baseName];
@@ -56,8 +80,22 @@ function run(){
     return;
   }
 
-  const result = search(startState, selectedEffects);
+  const id = ++queryId;
+  const ctx = pendingCtx = {baseName, def, startState};
+  const targets = selectedEffects.slice();
+  clearTimeout(spinnerTimer);
 
+  if(searchWorker){
+    spinnerTimer = setTimeout(showSearching, 150);
+    searchWorker.postMessage({id, startState, targets});
+  }else{
+    // Sync fallback blocks this thread, so paint the spinner first, then search.
+    showSearching();
+    setTimeout(()=>{ if(id===queryId) render(search(startState, targets), ctx); }, 50);
+  }
+}
+
+function render(result, {baseName, def, startState}){
   if(!result){
     outputEl.innerHTML = `<div class="panel" data-label="Result"><div class="unobtainable">No combination of ingredients (within the search limits) lands all of these on the same product from ${baseName}. Try removing one target, or start from a different base.</div></div>`;
     return;
