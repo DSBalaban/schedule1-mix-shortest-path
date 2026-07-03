@@ -80,3 +80,14 @@ page (e.g. from a console or a test runner) by loading `data.js` first.
 
 Scripts are loaded as plain (non-module) `<script>` tags in dependency order
 (`data.js` → `mixing.js` → `ui.js`) — no build step required.
+
+## Sources
+
+- [scheduleonemixer.com/how-mixing-in-schedule-1-works](https://scheduleonemixer.com/how-mixing-in-schedule-1-works) — vector-math reverse-engineering of the mixing system; source of the 114-row transformation table
+- [faxagate.com/en/gaming/schedule-1-effects](https://faxagate.com/en/gaming/schedule-1-effects) — per-ingredient effect/transformation breakdown
+- [prodigygamers.com/2025/04/18/schedule-1-all-effects-chart-list-each-mixers-result-guide](https://prodigygamers.com/2025/04/18/schedule-1-all-effects-chart-list-each-mixers-result-guide/) — per-ingredient effects chart
+- [sportskeeda.com/esports/all-ingredients-schedule-1-their-effects](https://sportskeeda.com/esports/all-ingredients-schedule-1-their-effects) — base/default effect per ingredient
+- [steamcommunity.com/sharedfiles/filedetails/?id=3468902915](https://steamcommunity.com/sharedfiles/filedetails/?id=3468902915) — community mixing guide with tested "if X then Y" tables
+- [steamcommunity.com/sharedfiles/filedetails/?id=3454740900](https://steamcommunity.com/sharedfiles/filedetails/?id=3454740900) — community mixing guide, confirmed the OG Kush Shrinking recipe independently
+- [steamcommunity.com/app/3164500/discussions/1/599648400266251583](https://steamcommunity.com/app/3164500/discussions/1/599648400266251583/) — player discussion thread hunting for a Shrinking recipe
+- [gamerant.com/schedule-1-mixing-guide-all-ingredient-effects](https://gamerant.com/schedule-1-mixing-guide-all-ingredient-effects/) — confirmed 34-effect / 16-basic-18-advanced / Lethal-unobtainable framing
