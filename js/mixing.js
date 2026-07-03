@@ -114,6 +114,43 @@ function applyIngredient(effectsArr, ingredient) {
 }
 
 /**
+ * INCREMENTAL EXPLORATION CACHE
+ * ------------------------------
+ * The BFS exploration is target-independent: from a given start state, the reachable
+ * graph and the depth of every state in it never change — only where the search *stops*
+ * depends on the targets. So the exploration survives between queries in CACHE (one per
+ * start state; changing base resets it). A new query first scans the already-explored
+ * states shallowest-first, and only if none matches does it resume expansion exactly
+ * where the previous query left off — mid-layer resume included, via `expandIdx` into
+ * the current frontier and the partially-built next layer. Adding one more target effect
+ * in the UI therefore reuses all prior work instead of recomputing from scratch.
+ *
+ * Cache invariants: `layers` holds fully-expanded depth layers in order; `frontier` is
+ * the current depth's states, expanded up to (not including) `expandIdx`; `nextPartial`
+ * holds the children generated so far from that prefix. `parent` doubles as the visited
+ * set, so re-expanding the state at `expandIdx` after an early return is safe — its
+ * already-generated children dedupe against `parent` and are already in `nextPartial`.
+ * Note the cache is retained for the session; a very deep query's exploration (~GB for
+ * pathological ones) stays allocated. ponytail: single cache slot keyed by start state,
+ * add an eviction/reset hook if memory ever matters.
+ */
+let CACHE = null;
+const MAX_DEPTH = 16, MAX_VISITED = 30000000;
+
+function reconstruct(parent, key) {
+  const steps = [];
+  for (let k = key, v; (v = parent.get(k)) !== -1; k = v % P) {
+    const pk = v % P;
+    steps.unshift({
+      ing: INGREDIENTS[Math.floor(v / P)],
+      from: maskToNames(pk % W, Math.floor(pk / W)),
+      to: maskToNames(k % W, Math.floor(k / W)),
+    });
+  }
+  return { steps, finalState: maskToNames(key % W, Math.floor(key / W)) };
+}
+
+/**
  * Breadth-first search for the shortest ingredient sequence turning `startState` into
  * a state that contains every effect in `targets`.
  *
@@ -130,46 +167,54 @@ function search(startState, targets) {
   const [tLo, tHi] = maskOf(targets);
   const [sLo, sHi] = maskOf(startState);
   const startKey = sHi * W + sLo;
+  const hit = k => ((k % W & tLo) >>> 0) === tLo && ((Math.floor(k / W) & tHi) >>> 0) === tHi;
 
-  const MAX_DEPTH = 16, MAX_VISITED = 30000000;
-  // visited + parent pointers in one map: value = ingredientIndex * 2^34 + parentKey.
-  const parent = new Map([[startKey, -1]]);
-  let frontier = [startKey];
-  let visitedCount = 1;
-
-  function reconstruct(key) {
-    const steps = [];
-    for (let k = key, v; (v = parent.get(k)) !== -1; k = v % P) {
-      const pk = v % P;
-      steps.unshift({
-        ing: INGREDIENTS[Math.floor(v / P)],
-        from: maskToNames(pk % W, Math.floor(pk / W)),
-        to: maskToNames(k % W, Math.floor(k / W)),
-      });
-    }
-    return { steps, finalState: maskToNames(key % W, Math.floor(key / W)) };
+  if (!CACHE || CACHE.startKey !== startKey) {
+    CACHE = { startKey, parent: new Map([[startKey, -1]]), layers: [[startKey]], frontier: [startKey], expandIdx: 0, nextPartial: [] };
   }
+  const C = CACHE;
 
-  for (let depth = 0; depth < MAX_DEPTH && frontier.length > 0; depth++) {
-    // Next layer bucketed by how many targets a state already holds (max 8 targets fit
-    // on a product), so the most-promising states are expanded first next depth.
+  // Already-explored states, shallowest first (frontier === last of layers; nextPartial
+  // is one deeper). Any match here is depth-minimal without expanding anything.
+  for (const layer of C.layers) for (const k of layer) if (hit(k)) return reconstruct(C.parent, k);
+  for (const k of C.nextPartial) if (hit(k)) return reconstruct(C.parent, k);
+
+  // Reorder the not-yet-expanded frontier suffix so states already holding more of the
+  // current targets are expanded first (max 8 targets fit on a product). Order within a
+  // layer is a pure heuristic — every state still gets expanded before the layer ends —
+  // so re-bucketing per query never affects which depth wins.
+  const rebucket = () => {
+    if (C.frontier.length - C.expandIdx < 2) return;
     const buckets = [[], [], [], [], [], [], [], [], []];
-    for (const key of frontier) {
+    for (let j = C.expandIdx; j < C.frontier.length; j++) {
+      const k = C.frontier[j];
+      buckets[popcount(k % W & tLo) + popcount(Math.floor(k / W) & tHi)].push(k);
+    }
+    let j = C.expandIdx;
+    for (let m = buckets.length - 1; m >= 0; m--) for (const k of buckets[m]) C.frontier[j++] = k;
+  };
+
+  rebucket();
+  while (C.frontier.length > 0 && C.layers.length <= MAX_DEPTH) {
+    for (; C.expandIdx < C.frontier.length; C.expandIdx++) {
+      const key = C.frontier[C.expandIdx];
       const lo = key % W, hi = Math.floor(key / W);
       for (let g = 0; g < ING_RULES.length; g++) {
         const nkey = applyMask(lo, hi, ING_RULES[g]);
-        if (nkey === key || parent.has(nkey)) continue;
-        parent.set(nkey, g * P + key);
-        if (++visitedCount > MAX_VISITED) return { limitReached: true };
-        const nl = nkey % W, nh = Math.floor(nkey / W);
-        if (((nl & tLo) >>> 0) === tLo && ((nh & tHi) >>> 0) === tHi) return reconstruct(nkey);
-        buckets[popcount(nl & tLo) + popcount(nh & tHi)].push(nkey);
+        if (nkey === key || C.parent.has(nkey)) continue;
+        C.parent.set(nkey, g * P + key);
+        if (C.parent.size > MAX_VISITED) return { limitReached: true };
+        C.nextPartial.push(nkey);
+        // Early return leaves expandIdx on this state; the resume re-expands it and the
+        // children generated above dedupe via C.parent.
+        if (hit(nkey)) return reconstruct(C.parent, nkey);
       }
     }
-    frontier = [];
-    for (let m = buckets.length - 1; m >= 0; m--) {
-      for (const k of buckets[m]) frontier.push(k);
-    }
+    C.layers.push(C.nextPartial);
+    C.frontier = C.nextPartial;
+    C.nextPartial = [];
+    C.expandIdx = 0;
+    rebucket();
   }
   return null;
 }
