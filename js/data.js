@@ -1,0 +1,70 @@
+/**
+ * Game data reverse-engineered from Schedule 1's mixing mechanics.
+ * Source data reflects game v0.3–0.4x mixing mechanics — re-check after major patches.
+ */
+
+// Each ingredient's own effect: applied when mixed in, if a free effect slot remains.
+const BASE_EFFECTS = {
+  "Cuke":"Energizing","Banana":"Gingeritis","Paracetamol":"Sneaky","Donut":"Calorie-Dense",
+  "Viagra":"Tropic Thunder","Mouth Wash":"Balding","Flu Medicine":"Sedating","Gasoline":"Toxic",
+  "Energy Drink":"Athletic","Motor Oil":"Slippery","Mega Bean":"Foggy","Chili":"Spicy",
+  "Battery":"Bright-eyed","Iodine":"Jennerising","Addy":"Thought-provoking","Horse Semen":"Long-faced"
+};
+
+// The single effect each product starts with before any ingredient is added.
+// null means the product starts with no effects at all ("blank canvas").
+const STRAIN_DEFAULTS = { "OG Kush":"Calming", "Sour Diesel":"Refreshing", "Green Crack":"Energizing", "Granddaddy Purple":"Sedating", "Meth":null, "Cocaine":null, "Shrooms":null };
+
+const INGREDIENTS = Object.keys(BASE_EFFECTS);
+
+// 114 verified single-effect transformation rules, each [fromEffect, ingredient, toEffect]:
+// "if the product currently has `fromEffect` and you mix in `ingredient`, it becomes `toEffect`".
+const TRANSFORMS = [
+["Euphoric","Viagra","Bright-eyed"],["Laxative","Flu Medicine","Euphoric"],["Calming","Mouth Wash","Anti-gravity"],
+["Glowing","Paracetamol","Toxic"],["Munchies","Battery","Tropic Thunder"],["Sedating","Addy","Gingeritis"],
+["Thought-provoking","Flu Medicine","Gingeritis"],["Electrifying","Paracetamol","Athletic"],["Anti-gravity","Chili","Tropic Thunder"],
+["Cyclopean","Banana","Energizing"],["Euphoric","Flu Medicine","Toxic"],["Foggy","Addy","Energizing"],
+["Thought-provoking","Mega Bean","Energizing"],["Euphoric","Energy Drink","Energizing"],["Glowing","Addy","Refreshing"],
+["Euphoric","Cuke","Laxative"],["Explosive","Mouth Wash","Sedating"],["Disorienting","Banana","Focused"],
+["Slippery","Cuke","Munchies"],["Energizing","Motor Oil","Munchies"],["Seizure-inducing","Mega Bean","Focused"],
+["Focused","Banana","Seizure-inducing"],["Focused","Donut","Euphoric"],["Munchies","Donut","Calming"],
+["Toxic","Paracetamol","Tropic Thunder"],["Sneaky","Gasoline","Tropic Thunder"],["Anti-gravity","Donut","Slippery"],
+["Munchies","Gasoline","Sedating"],["Euphoric","Battery","Zombifying"],["Gingeritis","Cuke","Thought-provoking"],
+["Energizing","Banana","Thought-provoking"],["Munchies","Paracetamol","Anti-gravity"],["Athletic","Flu Medicine","Munchies"],
+["Sedating","Energy Drink","Munchies"],["Munchies","Cuke","Athletic"],["Cyclopean","Flu Medicine","Foggy"],
+["Munchies","Chili","Toxic"],["Euphoric","Motor Oil","Sedating"],["Cyclopean","Battery","Glowing"],
+["Munchies","Motor Oil","Schizophrenic"],["Electrifying","Battery","Euphoric"],["Energizing","Gasoline","Euphoric"],
+["Toxic","Cuke","Euphoric"],["Focused","Mega Bean","Disorienting"],["Euphoric","Gasoline","Spicy"],
+["Shrinking","Flu Medicine","Paranoia"],["Calorie-Dense","Mouth Wash","Sneaky"],["Balding","Donut","Sneaky"],
+["Explosive","Addy","Euphoric"],["Long-faced","Addy","Electrifying"],["Thought-provoking","Horse Semen","Electrifying"],
+["Glowing","Energy Drink","Disorienting"],["Euphoric","Iodine","Seizure-inducing"],["Munchies","Flu Medicine","Slippery"],
+["Shrinking","Gasoline","Focused"],["Paranoia","Motor Oil","Anti-gravity"],["Paranoia","Paracetamol","Balding"],
+["Electrifying","Gasoline","Disorienting"],["Spicy","Energy Drink","Euphoric"],["Athletic","Chili","Euphoric"],
+["Athletic","Viagra","Sneaky"],["Tropic Thunder","Energy Drink","Sneaky"],["Calorie-Dense","Iodine","Gingeritis"],
+["Jennerising","Donut","Gingeritis"],["Disorienting","Gasoline","Glowing"],["Anti-gravity","Horse Semen","Calming"],
+["Shrinking","Battery","Munchies"],["Calming","Iodine","Balding"],["Disorienting","Energy Drink","Electrifying"],
+["Focused","Mouth Wash","Jennerising"],["Electrifying","Flu Medicine","Refreshing"],["Shrinking","Mega Bean","Electrifying"],
+["Paranoia","Banana","Jennerising"],["Shrinking","Donut","Energizing"],["Disorienting","Viagra","Toxic"],
+["Shrinking","Chili","Refreshing"],["Foggy","Iodine","Paranoia"],["Jennerising","Mega Bean","Paranoia"],
+["Smelly","Banana","Anti-gravity"],["Spicy","Paracetamol","Bright-eyed"],["Sneaky","Chili","Bright-eyed"],
+["Focused","Paracetamol","Gingeritis"],["Calming","Banana","Sneaky"],["Shrinking","Viagra","Gingeritis"],
+["Calorie-Dense","Donut","Explosive"],["Sneaky","Mega Bean","Calming"],["Foggy","Paracetamol","Calming"],
+["Foggy","Cuke","Cyclopean"],["Energizing","Mega Bean","Cyclopean"],["Schizophrenic","Energy Drink","Balding"],
+["Calming","Flu Medicine","Bright-eyed"],["Focused","Energy Drink","Shrinking"],["Slippery","Mega Bean","Toxic"],
+["Foggy","Motor Oil","Toxic"],["Athletic","Mega Bean","Laxative"],["Foggy","Energy Drink","Laxative"],
+["Laxative","Gasoline","Foggy"],["Laxative","Chili","Long-faced"],["Focused","Flu Medicine","Calming"],
+["Laxative","Battery","Calorie-Dense"],["Refreshing","Iodine","Thought-provoking"],["Calming","Paracetamol","Slippery"],
+["Calming","Mega Bean","Glowing"],["Seizure-inducing","Horse Semen","Energizing"],["Toxic","Iodine","Sneaky"],
+["Jennerising","Gasoline","Sneaky"],["Paranoia","Gasoline","Calming"],["Laxative","Viagra","Calming"],
+["Gingeritis","Gasoline","Smelly"],["Toxic","Banana","Smelly"],["Gingeritis","Horse Semen","Refreshing"],
+["Long-faced","Banana","Refreshing"],["Energizing","Paracetamol","Paranoia"],["Sneaky","Cuke","Paranoia"]
+];
+
+// Every effect name that can ever appear on a product (starting, intermediate, or target).
+const ALL_EFFECTS = Array.from(new Set([
+  ...Object.values(BASE_EFFECTS), ...TRANSFORMS.map(t=>t[0]), ...TRANSFORMS.map(t=>t[2])
+])).sort();
+
+// TRANSFORMS reshaped for O(1) lookup during search: TRANSFORM_MAP[fromEffect][ingredient] -> toEffect
+const TRANSFORM_MAP = {};
+TRANSFORMS.forEach(([f,i,t])=>{ (TRANSFORM_MAP[f] ||= {})[i] = t; });

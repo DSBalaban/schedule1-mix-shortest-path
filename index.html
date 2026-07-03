@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mixing Pathfinder — Schedule 1</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <span class="tag">Schedule 1 · Mixing System</span>
+  <h1>Mixing Pathfinder</h1>
+  <p class="sub">Pick a starting product and stack up as many target effects as you want. This searches the actual space of possible mixes — states are full effect sets, transitions are ingredient additions — for the <b>shortest ingredient sequence</b> that lands all of them on one product.</p>
+
+  <div class="panel" data-label="Setup">
+    <div class="controls">
+      <div class="field">
+        <label for="baseSelect">Starting product</label>
+        <select id="baseSelect">
+          <optgroup label="Weed (free default effect)">
+            <option value="OG Kush">OG Kush — starts with Calming</option>
+            <option value="Sour Diesel">Sour Diesel — starts with Refreshing</option>
+            <option value="Green Crack">Green Crack — starts with Energizing</option>
+            <option value="Granddaddy Purple">Granddaddy Purple — starts with Sedating</option>
+          </optgroup>
+          <optgroup label="Blank canvas (no starting effect)">
+            <option value="Meth">Meth</option>
+            <option value="Cocaine">Cocaine</option>
+            <option value="Shrooms">Shrooms</option>
+          </optgroup>
+        </select>
+      </div>
+      <div class="field">
+        <label for="addEffect">Add target effect</label>
+        <select id="addEffect"></select>
+      </div>
+    </div>
+    <div class="pillrow" id="pills"></div>
+    <div class="pillhint">Products cap out at 8 effects — pick up to 8 targets.</div>
+  </div>
+
+  <div id="output"></div>
+
+  <footer>
+    Graph built from a vector-math reverse-engineering of the game's mixing logic (114 verified single-effect transformations), extended here into a full multi-effect state search.<br>
+    Modeling assumption: adding an ingredient simultaneously transforms every currently-present effect that has a matching rule for it, then adds its own base effect if a slot remains (max 8 effects/product; once full, further ingredients have no effect). If real in-game behavior differs on simultaneous transforms, treat multi-target results as an upper bound and verify in-game.<br>
+    Source data reflects game v0.3–0.4x mixing mechanics — re-check after major patches.
+  </footer>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/mixing.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>
