@@ -22,9 +22,11 @@
  * WHY BFS AND NOT E.G. DIJKSTRA/A*
  * ---------------------------------
  * Every edge (every ingredient add) costs exactly 1 step, so there are no edge weights
- * to justify Dijkstra, and there's no cheap admissible heuristic for A* here (effect
- * sets don't have an obvious "distance to goal" metric). Plain BFS already gives an
- * optimal answer in that setting.
+ * to justify Dijkstra, and there's no admissible heuristic for A* here (an ingredient can
+ * just as easily transform an existing target effect away as add a missing one, so
+ * "targets matched so far" isn't guaranteed to only improve — it can't be used as a
+ * strict distance-to-goal bound). Plain BFS still gives an optimal (fewest-ingredients)
+ * answer in that setting.
  *
  * STATE EXPLOSION CONTROL
  * ------------------------
@@ -32,6 +34,15 @@
  * and ~40-ish known effects), so two safety valves keep the search bounded in pathological
  * cases (e.g. impossible target combinations): MAX_DEPTH caps how many ingredients deep
  * the search will look, and MAX_VISITED caps total states explored before giving up.
+ *
+ * Within those limits, search() still visits states depth-by-depth (preserving BFS
+ * optimality — a depth-d match is only returned once no shorter one exists), but *within*
+ * each depth it expands the most-promising states first: those already containing more of
+ * the target effects. Real target combos are typically reached via an intermediate state
+ * that already has most targets, one step before the final ingredient completes the set —
+ * so this ordering tends to surface a match early in its depth layer instead of only after
+ * grinding through the (usually much larger) irrelevant remainder of that layer, without
+ * changing which depth counts as "shortest."
  */
 
 // Canonical string form of an effect set, used as a Set/Map key so two states with the
@@ -73,35 +84,47 @@ function applyIngredient(effectsArr, ingredient){
  *   {limitReached: true}                    — MAX_VISITED exceeded before a match was found
  *   null                                    — search space (up to MAX_DEPTH) exhausted, no match exists
  *
- * The queue holds {state, steps} pairs, where `steps` is the full path taken to reach
- * `state` from the start. Because BFS visits states in non-decreasing distance order, and
- * `visited` prevents ever revisiting a state via a longer path, the first path found to a
- * satisfying state is a shortest one.
+ * Processes one full depth layer (`frontier`) at a time — `steps` is the full path taken
+ * to reach each state from the start, so every state in `frontier` is the same number of
+ * ingredients from the start. Because depths are processed in increasing order, and
+ * `visited` prevents ever reaching a state via a longer path, the first match found is
+ * guaranteed shortest, regardless of the order states are expanded *within* a depth.
+ *
+ * That within-depth order is not arbitrary, though: each layer is sorted so states already
+ * containing more of `targets` are expanded first (see file header). This can only change
+ * *which* same-depth match is returned when several exist (all equally valid, since they're
+ * the same length) and how many states get visited before a match is found — never whether
+ * a shorter match gets missed.
  */
 function search(startState, targets){
   if(targets.length===0) return {steps:[], finalState:startState};
   if(targets.every(t=>startState.includes(t))) return {steps:[], finalState:startState};
 
   const visited = new Set([stateKey(startState)]);
-  const queue = [{state:startState, steps:[]}];
-  let qi=0; // read index; queue only grows, so this avoids O(n) Array.shift() per pop
+  let frontier = [{state:startState, steps:[]}];
   const MAX_DEPTH = 10, MAX_VISITED = 150000;
+  let visitedCount = 1;
 
-  while(qi<queue.length){
-    const {state,steps} = queue[qi++];
-    if(steps.length>=MAX_DEPTH) continue;
+  for(let depth=0; depth<MAX_DEPTH && frontier.length>0; depth++){
+    const nextFrontier = [];
+    for(const {state,steps} of frontier){
+      for(const ing of INGREDIENTS){
+        const ns = applyIngredient(state, ing);
+        const key = stateKey(ns);
+        if(visited.has(key)) continue; // already reached this state via an equal-or-shorter path
+        visited.add(key);
+        visitedCount++;
+        if(visitedCount>MAX_VISITED) return {limitReached:true};
 
-    for(const ing of INGREDIENTS){
-      const ns = applyIngredient(state, ing);
-      const key = stateKey(ns);
-      if(visited.has(key)) continue; // already reached this state via an equal-or-shorter path
-      visited.add(key);
-      if(visited.size>MAX_VISITED) return {limitReached:true};
-
-      const newSteps = steps.concat([{ing, from:state, to:ns}]);
-      if(targets.every(t=>ns.includes(t))) return {steps:newSteps, finalState:ns};
-      queue.push({state:ns, steps:newSteps});
+        const newSteps = steps.concat([{ing, from:state, to:ns}]);
+        if(targets.every(t=>ns.includes(t))) return {steps:newSteps, finalState:ns};
+        nextFrontier.push({state:ns, steps:newSteps, matched:targets.filter(t=>ns.includes(t)).length});
+      }
     }
+    // Most-targets-already-present first, so the next depth's expansion (and its own match
+    // check) reaches likely candidates before the layer's irrelevant bulk.
+    nextFrontier.sort((a,b)=>b.matched-a.matched);
+    frontier = nextFrontier;
   }
   return null;
 }
