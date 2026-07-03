@@ -43,12 +43,6 @@
   </div>
 
   <div id="output"></div>
-
-  <footer>
-    Graph built from a vector-math reverse-engineering of the game's mixing logic (114 verified single-effect transformations), extended here into a full multi-effect state search.<br>
-    Modeling assumption: adding an ingredient simultaneously transforms every currently-present effect that has a matching rule for it, then adds its own base effect if a slot remains (max 8 effects/product; once full, further ingredients have no effect). If real in-game behavior differs on simultaneous transforms, treat multi-target results as an upper bound and verify in-game.<br>
-    Source data reflects game v0.3–0.4x mixing mechanics — re-check after major patches.
-  </footer>
 </div>
 
 <script src="js/data.js"></script>
