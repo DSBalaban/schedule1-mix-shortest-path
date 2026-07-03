@@ -5,7 +5,7 @@
  */
 importScripts('data.js', 'mixing.js');
 
-onmessage = e => {
+onmessage = (e) => {
   const { id, startState, targets } = e.data;
   postMessage({ id, result: search(startState, targets) });
 };

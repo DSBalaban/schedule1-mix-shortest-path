@@ -1,0 +1,5 @@
+package-lock.json
+# plain text despite the extension
+tests/test-recipes.json
+# deliberately dense one-rule-per-line format
+css/style.css

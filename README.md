@@ -1,15 +1,16 @@
 # Mixing Pathfinder — Schedule 1
 
 A small client-side tool that finds the **shortest ingredient sequence** to give a
-*Schedule 1* product any chosen combination of effects.
+_Schedule 1_ product any chosen combination of effects.
 
 ## What it does
 
-In *Schedule 1*, products (weed, meth, cocaine, shrooms) can carry up to 8 simultaneous
+In _Schedule 1_, products (weed, meth, cocaine, shrooms) can carry up to 8 simultaneous
 "effects" (Calming, Toxic, Bright-eyed, etc.). Mixing in one of 16 ingredients can
 transform effects already present and/or add a new one, following a fixed set of rules.
 
 Given:
+
 - a **starting product** (some start with one free effect, others start blank), and
 - a set of **target effects** you want on the final product (up to 8),
 
@@ -21,7 +22,7 @@ effect at once, plus a shopping list of what to buy.
 
 The mixing system is modeled as a graph:
 
-- **Node** = a *state*, i.e. the exact set of effects currently on the product (order
+- **Node** = a _state_, i.e. the exact set of effects currently on the product (order
   doesn't matter, no duplicates, capped at 8).
 - **Edge** = "add ingredient X", which deterministically transforms one state into
   another (see `applyIngredient` in `js/mixing.js`).
@@ -33,11 +34,12 @@ the same (1 step), plain **breadth-first search (BFS)** is optimal — no need f
 Dijkstra or A*, since there's no meaningful edge weight or distance heuristic here.
 
 BFS explores states in strict order of distance from the start, expanding one full
-"layer" (all states reachable in *n* ingredients) before moving to layer *n+1*. The
+"layer" (all states reachable in _n_ ingredients) before moving to layer _n+1_. The
 first time it reaches a state that contains every target effect, that path is
 guaranteed to be one of the shortest possible — so the search can stop immediately.
 
 Implementation notes (`js/mixing.js`):
+
 - `stateKey()` canonicalizes an effect set (sorted, joined) so it can be used as a
   de-duplication key in a `Set`, regardless of insertion order.
 - `applyIngredient()` encodes the actual game rule: every currently-present effect

@@ -43,18 +43,25 @@
  */
 
 const EFFECT_IDX = new Map(ALL_EFFECTS.map((e, i) => [e, i]));
-const W = 4294967296;          // 2^32: lo-word span of a packed state key
-const P = 17179869184;         // 2^34: state-key span inside a parent-map value
+const W = 4294967296; // 2^32: lo-word span of a packed state key
+const P = 17179869184; // 2^34: state-key span inside a parent-map value
 
 // One precomputed rule pack per ingredient: parallel single-bit masks for each
 // transform rule (from/to, split into lo/hi words) plus the base effect's bit.
-const ING_RULES = INGREDIENTS.map(ing => {
+const ING_RULES = INGREDIENTS.map((ing) => {
   const pack = { ing, fLo: [], fHi: [], tLo: [], tHi: [], bLo: 0, bHi: 0 };
-  const bit = e => { const i = EFFECT_IDX.get(e); return i < 32 ? [(1 << i) >>> 0, 0] : [0, (1 << (i - 32)) >>> 0]; };
+  const bit = (e) => {
+    const i = EFFECT_IDX.get(e);
+    return i < 32 ? [(1 << i) >>> 0, 0] : [0, (1 << (i - 32)) >>> 0];
+  };
   TRANSFORMS.forEach(([f, i, t]) => {
     if (i !== ing) return;
-    const [fl, fh] = bit(f), [tl, th] = bit(t);
-    pack.fLo.push(fl); pack.fHi.push(fh); pack.tLo.push(tl); pack.tHi.push(th);
+    const [fl, fh] = bit(f),
+      [tl, th] = bit(t);
+    pack.fLo.push(fl);
+    pack.fHi.push(fh);
+    pack.tLo.push(tl);
+    pack.tHi.push(th);
   });
   [pack.bLo, pack.bHi] = bit(BASE_EFFECTS[ing]);
   return pack;
@@ -67,10 +74,12 @@ function popcount(x) {
 }
 
 function maskOf(effects) {
-  let lo = 0, hi = 0;
+  let lo = 0,
+    hi = 0;
   for (const e of effects) {
     const i = EFFECT_IDX.get(e);
-    if (i < 32) lo = (lo | (1 << i)) >>> 0; else hi = (hi | (1 << (i - 32))) >>> 0;
+    if (i < 32) lo = (lo | (1 << i)) >>> 0;
+    else hi = (hi | (1 << (i - 32))) >>> 0;
   }
   return [lo, hi];
 }
@@ -86,18 +95,21 @@ function maskToNames(lo, hi) {
 
 // Core mix step on a bitmask state; returns the packed key of the resulting state.
 function applyMask(lo, hi, pack) {
-  let nl = lo, nh = hi;
+  let nl = lo,
+    nh = hi;
   const { fLo, fHi, tLo, tHi } = pack;
   for (let k = 0; k < fLo.length; k++) {
     // `from` checked against the pre-mix snapshot (lo/hi), `to` against the evolving state.
-    if (((lo & fLo[k]) | (hi & fHi[k])) && !((nl & tLo[k]) | (nh & tHi[k]))) {
+    if ((lo & fLo[k]) | (hi & fHi[k]) && !((nl & tLo[k]) | (nh & tHi[k]))) {
       nl = (nl & ~fLo[k]) | tLo[k];
       nh = (nh & ~fHi[k]) | tHi[k];
     }
   }
-  nl >>>= 0; nh >>>= 0;
+  nl >>>= 0;
+  nh >>>= 0;
   if (!((nl & pack.bLo) | (nh & pack.bHi)) && popcount(nl) + popcount(nh) < 8) {
-    nl = (nl | pack.bLo) >>> 0; nh = (nh | pack.bHi) >>> 0;
+    nl = (nl | pack.bLo) >>> 0;
+    nh = (nh | pack.bHi) >>> 0;
   }
   return nh * W + nl;
 }
@@ -135,7 +147,8 @@ function applyIngredient(effectsArr, ingredient) {
  * add an eviction/reset hook if memory ever matters.
  */
 let CACHE = null;
-const MAX_DEPTH = 16, MAX_VISITED = 30000000;
+const MAX_DEPTH = 16,
+  MAX_VISITED = 30000000;
 
 function reconstruct(parent, key) {
   const steps = [];
@@ -161,16 +174,23 @@ function reconstruct(parent, key) {
  *   null                                        — reachable space exhausted, no match exists
  */
 function search(startState, targets) {
-  if (targets.every(t => startState.includes(t))) return { steps: [], finalState: startState };
-  if (targets.some(t => !EFFECT_IDX.has(t))) return null;
+  if (targets.every((t) => startState.includes(t))) return { steps: [], finalState: startState };
+  if (targets.some((t) => !EFFECT_IDX.has(t))) return null;
 
   const [tLo, tHi] = maskOf(targets);
   const [sLo, sHi] = maskOf(startState);
   const startKey = sHi * W + sLo;
-  const hit = k => ((k % W & tLo) >>> 0) === tLo && ((Math.floor(k / W) & tHi) >>> 0) === tHi;
+  const hit = (k) => ((k % W) & tLo) >>> 0 === tLo && (Math.floor(k / W) & tHi) >>> 0 === tHi;
 
   if (!CACHE || CACHE.startKey !== startKey) {
-    CACHE = { startKey, parent: new Map([[startKey, -1]]), layers: [[startKey]], frontier: [startKey], expandIdx: 0, nextPartial: [] };
+    CACHE = {
+      startKey,
+      parent: new Map([[startKey, -1]]),
+      layers: [[startKey]],
+      frontier: [startKey],
+      expandIdx: 0,
+      nextPartial: [],
+    };
   }
   const C = CACHE;
 
@@ -188,7 +208,7 @@ function search(startState, targets) {
     const buckets = [[], [], [], [], [], [], [], [], []];
     for (let j = C.expandIdx; j < C.frontier.length; j++) {
       const k = C.frontier[j];
-      buckets[popcount(k % W & tLo) + popcount(Math.floor(k / W) & tHi)].push(k);
+      buckets[popcount((k % W) & tLo) + popcount(Math.floor(k / W) & tHi)].push(k);
     }
     let j = C.expandIdx;
     for (let m = buckets.length - 1; m >= 0; m--) for (const k of buckets[m]) C.frontier[j++] = k;
@@ -198,7 +218,8 @@ function search(startState, targets) {
   while (C.frontier.length > 0 && C.layers.length <= MAX_DEPTH) {
     for (; C.expandIdx < C.frontier.length; C.expandIdx++) {
       const key = C.frontier[C.expandIdx];
-      const lo = key % W, hi = Math.floor(key / W);
+      const lo = key % W,
+        hi = Math.floor(key / W);
       for (let g = 0; g < ING_RULES.length; g++) {
         const nkey = applyMask(lo, hi, ING_RULES[g]);
         if (nkey === key || C.parent.has(nkey)) continue;
