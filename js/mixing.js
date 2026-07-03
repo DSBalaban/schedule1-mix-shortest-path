@@ -14,64 +14,103 @@
  * Given a starting state (the product's default effect, or none) and a set of target
  * effects the user wants present simultaneously, search() finds the SHORTEST path
  * (fewest ingredients) from the start node to any node whose effect set is a superset
- * of the targets. This is exactly unweighted shortest-path-in-a-graph, so breadth-first
- * search (BFS) is the right tool: BFS explores nodes in order of distance from the start,
- * so the first time it reaches a state containing all targets, that path is guaranteed
- * minimal.
+ * of the targets. Every edge costs 1, so breadth-first search gives the minimal answer:
+ * the first time BFS reaches a state containing all targets, no shorter path exists.
  *
- * WHY BFS AND NOT E.G. DIJKSTRA/A*
- * ---------------------------------
- * Every edge (every ingredient add) costs exactly 1 step, so there are no edge weights
- * to justify Dijkstra, and there's no admissible heuristic for A* here (an ingredient can
- * just as easily transform an existing target effect away as add a missing one, so
- * "targets matched so far" isn't guaranteed to only improve — it can't be used as a
- * strict distance-to-goal bound). Plain BFS still gives an optimal (fewest-ingredients)
- * answer in that setting.
+ * GAME RULES MODELED (per ingredient added)
+ * -----------------------------------------
+ * 1. Each transform rule [from, ingredient, to] fires only if `from` is on the product
+ *    AND `to` is NOT already on it. A blocked rule leaves `from` untouched — it is never
+ *    consumed/merged away. (Getting this wrong silently destroys effects: e.g. Mouth Wash
+ *    on a product with both Explosive and Sedating must keep Explosive, because
+ *    Explosive→Sedating is blocked by Sedating already being present.)
+ * 2. All of an ingredient's rules check `from` against the pre-mix snapshot, so one
+ *    rule's output can't chain into another rule in the same mix.
+ * 3. Transforms fire even when the product is at the 8-effect cap. The cap only blocks
+ *    step 4.
+ * 4. The ingredient's own base effect is added last, if a slot is free and it isn't
+ *    already present.
  *
- * STATE EXPLOSION CONTROL
- * ------------------------
- * The reachable state space is large but not infinite (effect sets are bounded by 8 slots
- * and ~40-ish known effects), so two safety valves keep the search bounded in pathological
- * cases (e.g. impossible target combinations): MAX_DEPTH caps how many ingredients deep
- * the search will look, and MAX_VISITED caps total states explored before giving up.
- *
- * Within those limits, search() still visits states depth-by-depth (preserving BFS
- * optimality — a depth-d match is only returned once no shorter one exists), but *within*
- * each depth it expands the most-promising states first: those already containing more of
- * the target effects. Real target combos are typically reached via an intermediate state
- * that already has most targets, one step before the final ingredient completes the set —
- * so this ordering tends to surface a match early in its depth layer instead of only after
- * grinding through the (usually much larger) irrelevant remainder of that layer, without
- * changing which depth counts as "shortest."
+ * PERFORMANCE
+ * -----------
+ * States are bitmasks over ALL_EFFECTS (34 effects → two 32-bit words lo/hi, packed into
+ * one float64 key = hi*2^32+lo, exact below 2^53). visited doubles as a parent-pointer
+ * map for path reconstruction, so frontier entries are just numbers — no per-state arrays
+ * or string keys. Within each depth layer, states already containing more target effects
+ * are expanded first (bucketed, not sorted — O(n)); this never changes which depth wins,
+ * only how fast the winning state surfaces inside its layer. Two safety valves bound
+ * pathological queries: MAX_DEPTH and MAX_VISITED.
  */
 
-// Canonical string form of an effect set, used as a Set/Map key so two states with the
-// same effects in different insertion order are recognized as identical for `visited`.
-function stateKey(arr){ return arr.slice().sort().join('|'); }
+const EFFECT_IDX = new Map(ALL_EFFECTS.map((e, i) => [e, i]));
+const W = 4294967296;          // 2^32: lo-word span of a packed state key
+const P = 17179869184;         // 2^34: state-key span inside a parent-map value
+
+// One precomputed rule pack per ingredient: parallel single-bit masks for each
+// transform rule (from/to, split into lo/hi words) plus the base effect's bit.
+const ING_RULES = INGREDIENTS.map(ing => {
+  const pack = { ing, fLo: [], fHi: [], tLo: [], tHi: [], bLo: 0, bHi: 0 };
+  const bit = e => { const i = EFFECT_IDX.get(e); return i < 32 ? [(1 << i) >>> 0, 0] : [0, (1 << (i - 32)) >>> 0]; };
+  TRANSFORMS.forEach(([f, i, t]) => {
+    if (i !== ing) return;
+    const [fl, fh] = bit(f), [tl, th] = bit(t);
+    pack.fLo.push(fl); pack.fHi.push(fh); pack.tLo.push(tl); pack.tHi.push(th);
+  });
+  [pack.bLo, pack.bHi] = bit(BASE_EFFECTS[ing]);
+  return pack;
+});
+
+function popcount(x) {
+  x -= (x >>> 1) & 0x55555555;
+  x = (x & 0x33333333) + ((x >>> 2) & 0x33333333);
+  return (((x + (x >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
+}
+
+function maskOf(effects) {
+  let lo = 0, hi = 0;
+  for (const e of effects) {
+    const i = EFFECT_IDX.get(e);
+    if (i < 32) lo = (lo | (1 << i)) >>> 0; else hi = (hi | (1 << (i - 32))) >>> 0;
+  }
+  return [lo, hi];
+}
+
+// ALL_EFFECTS is sorted, so iterating bits in index order yields sorted names.
+function maskToNames(lo, hi) {
+  const out = [];
+  for (let i = 0; i < ALL_EFFECTS.length; i++) {
+    if (i < 32 ? (lo >>> i) & 1 : (hi >>> (i - 32)) & 1) out.push(ALL_EFFECTS[i]);
+  }
+  return out;
+}
+
+// Core mix step on a bitmask state; returns the packed key of the resulting state.
+function applyMask(lo, hi, pack) {
+  let nl = lo, nh = hi;
+  const { fLo, fHi, tLo, tHi } = pack;
+  for (let k = 0; k < fLo.length; k++) {
+    // `from` checked against the pre-mix snapshot (lo/hi), `to` against the evolving state.
+    if (((lo & fLo[k]) | (hi & fHi[k])) && !((nl & tLo[k]) | (nh & tHi[k]))) {
+      nl = (nl & ~fLo[k]) | tLo[k];
+      nh = (nh & ~fHi[k]) | tHi[k];
+    }
+  }
+  nl >>>= 0; nh >>>= 0;
+  if (!((nl & pack.bLo) | (nh & pack.bHi)) && popcount(nl) + popcount(nh) < 8) {
+    nl = (nl | pack.bLo) >>> 0; nh = (nh | pack.bHi) >>> 0;
+  }
+  return nh * W + nl;
+}
 
 /**
  * Simulates mixing one ingredient into a product currently holding `effectsArr`.
- *
- * Game rule being modeled: adding an ingredient simultaneously transforms every
- * currently-present effect that has a matching TRANSFORM_MAP rule for that ingredient,
- * then adds the ingredient's own base effect if a slot remains. If the product is
- * already at the 8-effect cap, further ingredients have no effect at all.
- *
- * Note: this "simultaneous transform" behavior is the app's own modeling assumption
- * about how multiple matching effects resolve at once — the footer flags multi-target
- * results as an upper bound to verify in-game, since it isn't independently confirmed.
+ * Name-based wrapper around applyMask — same semantics the search uses.
  */
-function applyIngredient(effectsArr, ingredient){
-  const cur = new Set(effectsArr);
-  if(cur.size >= 8) return effectsArr.slice();
-  const next = new Set(cur);
-  for(const e of cur){
-    const rule = TRANSFORM_MAP[e] && TRANSFORM_MAP[e][ingredient];
-    if(rule){ next.delete(e); next.add(rule); }
-  }
-  const base = BASE_EFFECTS[ingredient];
-  if(next.size < 8 && !next.has(base)) next.add(base);
-  return Array.from(next).sort();
+function applyIngredient(effectsArr, ingredient) {
+  const pack = ING_RULES[INGREDIENTS.indexOf(ingredient)];
+  const [lo, hi] = maskOf(effectsArr);
+  const key = applyMask(lo, hi, pack);
+  return maskToNames(key % W, Math.floor(key / W));
 }
 
 /**
@@ -79,52 +118,58 @@ function applyIngredient(effectsArr, ingredient){
  * a state that contains every effect in `targets`.
  *
  * Returns:
- *   {steps: [], finalState}                — targets already satisfied, 0 ingredients needed
- *   {steps: [{ing, from, to}, ...], finalState} — shortest sequence found, in order
- *   {limitReached: true}                    — MAX_VISITED exceeded before a match was found
- *   null                                    — search space (up to MAX_DEPTH) exhausted, no match exists
- *
- * Processes one full depth layer (`frontier`) at a time — `steps` is the full path taken
- * to reach each state from the start, so every state in `frontier` is the same number of
- * ingredients from the start. Because depths are processed in increasing order, and
- * `visited` prevents ever reaching a state via a longer path, the first match found is
- * guaranteed shortest, regardless of the order states are expanded *within* a depth.
- *
- * That within-depth order is not arbitrary, though: each layer is sorted so states already
- * containing more of `targets` are expanded first (see file header). This can only change
- * *which* same-depth match is returned when several exist (all equally valid, since they're
- * the same length) and how many states get visited before a match is found — never whether
- * a shorter match gets missed.
+ *   {steps: [], finalState}                     — targets already satisfied
+ *   {steps: [{ing, from, to}, ...], finalState} — shortest sequence, in order
+ *   {limitReached: true}                        — MAX_VISITED exceeded before a match
+ *   null                                        — reachable space exhausted, no match exists
  */
-function search(startState, targets){
-  if(targets.length===0) return {steps:[], finalState:startState};
-  if(targets.every(t=>startState.includes(t))) return {steps:[], finalState:startState};
+function search(startState, targets) {
+  if (targets.every(t => startState.includes(t))) return { steps: [], finalState: startState };
+  if (targets.some(t => !EFFECT_IDX.has(t))) return null;
 
-  const visited = new Set([stateKey(startState)]);
-  let frontier = [{state:startState, steps:[]}];
-  const MAX_DEPTH = 10, MAX_VISITED = 150000;
+  const [tLo, tHi] = maskOf(targets);
+  const [sLo, sHi] = maskOf(startState);
+  const startKey = sHi * W + sLo;
+
+  const MAX_DEPTH = 16, MAX_VISITED = 30000000;
+  // visited + parent pointers in one map: value = ingredientIndex * 2^34 + parentKey.
+  const parent = new Map([[startKey, -1]]);
+  let frontier = [startKey];
   let visitedCount = 1;
 
-  for(let depth=0; depth<MAX_DEPTH && frontier.length>0; depth++){
-    const nextFrontier = [];
-    for(const {state,steps} of frontier){
-      for(const ing of INGREDIENTS){
-        const ns = applyIngredient(state, ing);
-        const key = stateKey(ns);
-        if(visited.has(key)) continue; // already reached this state via an equal-or-shorter path
-        visited.add(key);
-        visitedCount++;
-        if(visitedCount>MAX_VISITED) return {limitReached:true};
+  function reconstruct(key) {
+    const steps = [];
+    for (let k = key, v; (v = parent.get(k)) !== -1; k = v % P) {
+      const pk = v % P;
+      steps.unshift({
+        ing: INGREDIENTS[Math.floor(v / P)],
+        from: maskToNames(pk % W, Math.floor(pk / W)),
+        to: maskToNames(k % W, Math.floor(k / W)),
+      });
+    }
+    return { steps, finalState: maskToNames(key % W, Math.floor(key / W)) };
+  }
 
-        const newSteps = steps.concat([{ing, from:state, to:ns}]);
-        if(targets.every(t=>ns.includes(t))) return {steps:newSteps, finalState:ns};
-        nextFrontier.push({state:ns, steps:newSteps, matched:targets.filter(t=>ns.includes(t)).length});
+  for (let depth = 0; depth < MAX_DEPTH && frontier.length > 0; depth++) {
+    // Next layer bucketed by how many targets a state already holds (max 8 targets fit
+    // on a product), so the most-promising states are expanded first next depth.
+    const buckets = [[], [], [], [], [], [], [], [], []];
+    for (const key of frontier) {
+      const lo = key % W, hi = Math.floor(key / W);
+      for (let g = 0; g < ING_RULES.length; g++) {
+        const nkey = applyMask(lo, hi, ING_RULES[g]);
+        if (nkey === key || parent.has(nkey)) continue;
+        parent.set(nkey, g * P + key);
+        if (++visitedCount > MAX_VISITED) return { limitReached: true };
+        const nl = nkey % W, nh = Math.floor(nkey / W);
+        if (((nl & tLo) >>> 0) === tLo && ((nh & tHi) >>> 0) === tHi) return reconstruct(nkey);
+        buckets[popcount(nl & tLo) + popcount(nh & tHi)].push(nkey);
       }
     }
-    // Most-targets-already-present first, so the next depth's expansion (and its own match
-    // check) reaches likely candidates before the layer's irrelevant bulk.
-    nextFrontier.sort((a,b)=>b.matched-a.matched);
-    frontier = nextFrontier;
+    frontier = [];
+    for (let m = buckets.length - 1; m >= 0; m--) {
+      for (const k of buckets[m]) frontier.push(k);
+    }
   }
   return null;
 }
