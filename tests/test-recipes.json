@@ -1,0 +1,59 @@
+[
+  {
+    "name": "Slippery Foggy Explosive",
+    "effects": ["Calorie-Dense", "Toxic", "Foggy", "Slippery", "Explosive"],
+    "possibleRecipe": ["Gasoline", "Donut", "Donut", "Motor Oil", "Mega Bean"]
+  },
+  {
+    "name": "Banana LeClerc",
+    "effects": [
+      "Sedating",
+      "Euphoric",
+      "Explosive",
+      "Jennerising",
+      "Balding",
+      "Tropic Thunder",
+      "Thought-provoking",
+      "Gingeritis"
+    ],
+    "possibleRecipe": [
+      "Flu Medicine",
+      "Gasoline",
+      "Donut",
+      "Donut",
+      "Mouth Wash",
+      "Viagra",
+      "Cuke",
+      "Banana"
+    ]
+  },
+  {
+    "name": "Monster Effects",
+    "effects": [
+      "Explosive",
+      "Electrifying",
+      "Shrinking",
+      "Zombifying",
+      "Anti-gravity",
+      "Schizophrenic",
+      "Cyclopean",
+      "Seizure-inducing"
+    ],
+    "possibleRecipe": [
+      "Donut",
+      "Donut",
+      "Chili",
+      "Energy Drink",
+      "Iodine",
+      "Flu Medicine",
+      "Cuke",
+      "Chili",
+      "Battery",
+      "Horse Semen",
+      "Mega Bean",
+      "Energy Drink",
+      "Iodine",
+      "Motor Oil"
+    ]
+  }
+]

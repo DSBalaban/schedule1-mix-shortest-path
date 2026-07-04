@@ -25,7 +25,14 @@
  *    on a product with both Explosive and Sedating must keep Explosive, because
  *    Explosive→Sedating is blocked by Sedating already being present.)
  * 2. All of an ingredient's rules check `from` against the pre-mix snapshot, so one
- *    rule's output can't chain into another rule in the same mix.
+ *    rule's output can't chain into another rule in the same mix. Rules are evaluated
+ *    in alphabetical order of their `from` effect — this matters because an earlier
+ *    rule can consume the effect that blocks a later rule's `to`. (Verified in-game:
+ *    Paracetamol on {Calming, Foggy} runs Calming→Slippery first, which frees Calming
+ *    so Foggy→Calming then fires; the reverse order would wrongly keep Foggy.)
+ *    Alphabetical is inferred from that single observation plus community mixing
+ *    tables — if another in-game mix ever disagrees, the sort in ING_RULES below is
+ *    the single place to adjust.
  * 3. Transforms fire even when the product is at the 8-effect cap. The cap only blocks
  *    step 4.
  * 4. The ingredient's own base effect is added last, if a slot is free and it isn't
@@ -54,15 +61,17 @@ const ING_RULES = INGREDIENTS.map((ing) => {
     const i = EFFECT_IDX.get(e);
     return i < 32 ? [(1 << i) >>> 0, 0] : [0, (1 << (i - 32)) >>> 0];
   };
-  TRANSFORMS.forEach(([f, i, t]) => {
-    if (i !== ing) return;
-    const [fl, fh] = bit(f),
-      [tl, th] = bit(t);
-    pack.fLo.push(fl);
-    pack.fHi.push(fh);
-    pack.tLo.push(tl);
-    pack.tHi.push(th);
-  });
+  // Game evaluates an ingredient's rules alphabetically by `from` effect (see header).
+  TRANSFORMS.filter(([, i]) => i === ing)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .forEach(([f, , t]) => {
+      const [fl, fh] = bit(f),
+        [tl, th] = bit(t);
+      pack.fLo.push(fl);
+      pack.fHi.push(fh);
+      pack.tLo.push(tl);
+      pack.tHi.push(th);
+    });
   [pack.bLo, pack.bHi] = bit(BASE_EFFECTS[ing]);
   return pack;
 });
